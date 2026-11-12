@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>얼굴 인증 데모 (MediaPipe + MobileFaceNet + ONNX Runtime Web)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans KR', 'Malgun Gothic', Arial, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh; padding: 20px; color: #333;
+  }
+  .container {
+    background: #fff; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    max-width: 1100px; margin: 0 auto; padding: 32px;
+  }
+  h1 { text-align: center; font-size: 26px; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #666; font-size: 13px; margin-bottom: 20px; }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; display: none; }
+  .banner.show { display: block; }
+  .banner.err { background: #fee; color: #c33; border: 1px solid #fcc; }
+  .banner.info { background: #eef2ff; color: #3b4cca; border: 1px solid #d5dcff; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 22px; }
+  .chip { font-size: 12px; padding: 5px 10px; border-radius: 14px; background: #f0f0f4; color: #666; }
+  .chip.ok { background: #e6f7ec; color: #1a7f45; }
+  .chip.fail { background: #fee; color: #c33; }
+  .chip.load { background: #fff6e0; color: #9a6a00; }
+
+  .grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #111; border-radius: 14px; overflow: hidden; }
+  .stage video, .stage canvas.overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .guide { position: absolute; left: 50%; top: 50%; width: 42%; aspect-ratio: 3 / 4; transform: translate(-50%, -50%);
+           border: 2px dashed rgba(255,255,255,.55); border-radius: 50%; pointer-events: none; }
+  .prompt { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px; text-align: center; color: #fff; font-size: 17px;
+            font-weight: 600; background: linear-gradient(transparent, rgba(0,0,0,.75)); min-height: 64px; display: flex; align-items: flex-end; justify-content: center; }
+  .stage.good .guide { border-color: #4cd37b; }
+
+  .meter { margin-top: 12px; font-size: 12px; color: #666; }
+  .yaw { position: relative; height: 10px; background: #eee; border-radius: 5px; margin-top: 4px; }
+  .yaw .zone { position: absolute; top: 0; bottom: 0; background: #cfeedd; }
+  .yaw .dot { position: absolute; top: -3px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #667eea; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3); left: 50%; }
+  .yaw .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #888; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .thumb { width: 84px; height: 84px; border-radius: 8px; background: #222; image-rendering: auto; }
+
+  .panel { border: 1px solid #e6e6ee; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 16px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #667eea; }
+  label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+  input[type=text], select { width: 100%; padding: 9px 11px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+  input[type=range] { width: 100%; }
+  button { padding: 10px 14px; border: 0; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; color: #fff;
+           background: linear-gradient(135deg, #667eea, #764ba2); }
+  button.sec { background: #eceefb; color: #3b4cca; }
+  button.danger { background: #e5484d; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .step { font-size: 11px; padding: 3px 8px; border-radius: 10px; background: #f0f0f4; color: #777; }
+  .step.cur { background: #fff6e0; color: #9a6a00; font-weight: 700; }
+  .step.done { background: #e6f7ec; color: #1a7f45; }
+  .step.bad { background: #fee; color: #c33; }
+  .result { margin-top: 12px; padding: 12px; border-radius: 8px; font-size: 14px; display: none; white-space: pre-line; }
+  .result.show { display: block; }
+  .result.ok { background: #e6f7ec; color: #1a7f45; }
+  .result.bad { background: #fee; color: #c33; }
+  .bar { height: 8px; background: #eee; border-radius: 4px; margin-top: 8px; position: relative; overflow: visible; }
+  .bar .fill { height: 100%; border-radius: 4px; background: #667eea; }
+  .bar .thr { position: absolute; top: -4px; bottom: -4px; width: 2px; background: #e5484d; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #eee; }
+  td.ok { color: #1a7f45; } td.bad { color: #c33; }
+  details summary { cursor: pointer; font-size: 13px; color: #3b4cca; margin-bottom: 8px; }
+  .small { font-size: 12px; color: #777; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🙂 얼굴 인증 데모</h1>
+  <p class="subtitle">MediaPipe Face Detector · MobileFaceNet(ONNX) · ONNX Runtime Web · IndexedDB + AES-256-GCM · 챌린지 라이브니스 · 실패 제한</p>
+
+  <div id="bannerErr" class="banner err"></div>
+  <div id="bannerInfo" class="banner info"></div>
+
+  <div class="chips">
+    <span id="chipMp" class="chip load">MediaPipe 얼굴 검출 대기</span>
+    <span id="chipOrt" class="chip load">ONNX Runtime Web 대기</span>
+    <span id="chipModel" class="chip load">MobileFaceNet 대기</span>
+    <span id="chipCam" class="chip">카메라 꺼짐</span>
+  </div>
+
+  <div class="grid">
+    <!-- 왼쪽: 카메라 -->
+    <div>
+      <div id="stage" class="stage">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay" class="overlay"></canvas>
+        <div class="guide"></div>
+        <div id="prompt" class="prompt">카메라를 켜세요</div>
+      </div>
+      <div class="meter">
+        좌우 회전(yaw) 지표 — 화면 기준 (초록 영역 = 정면)
+        <div class="yaw" id="yaw">
+          <div class="zone" id="yawZone"></div>
+          <div class="tick" id="tickL"></div><div class="tick" id="tickR"></div>
+          <div class="dot" id="yawDot"></div>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnCam">카메라 켜기</button>
+        <button id="btnCancel" class="sec" disabled>진행 중단</button>
+        <div style="margin-left:auto; text-align:center">
+          <canvas id="aligned" class="thumb" width="112" height="112"></canvas>
+          <div class="small">정렬된 얼굴 112×112</div>
+        </div>
+      </div>
+      <div id="steps" class="steps"></div>
+    </div>
+
+    <!-- 오른쪽: 기능 -->
+    <div>
+      <div class="panel">
+        <h2>1. 얼굴 등록</h2>
+        <label for="enrollId">사용자 ID</label>
+        <input id="enrollId" type="text" maxlength="32" placeholder="예: hong" autocomplete="off">
+        <div class="btns"><button id="btnEnroll" disabled>등록 시작 (정면 5장 + 라이브니스)</button></div>
+        <div id="enrollResult" class="result"></div>
+      </div>
+
+      <div class="panel">
+        <h2>2. 얼굴 인증</h2>
+        <label for="authId">사용자 선택</label>
+        <select id="authId"></select>
+        <div id="lockInfo" class="small" style="margin-top:6px"></div>
+        <div class="btns"><button id="btnAuth" disabled>인증 시작</button></div>
+        <div id="authResult" class="result"></div>
+        <div class="bar" id="scoreBar" style="display:none"><div class="fill" id="scoreFill"></div><div class="thr" id="scoreThr"></div></div>
+      </div>
+
+      <div class="panel">
+        <h2>3. 등록 사용자</h2>
+        <table>
+          <thead><tr><th>ID</th><th>등록</th><th>인증 성공</th><th></th></tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
+        <div id="noUsers" class="small">등록된 사용자가 없습니다.</div>
+      </div>
+
+      <div class="panel">
+        <details>
+          <summary>설정 · 모델 · 로그</summary>
+          <label for="thr">코사인 유사도 임계값: <b id="thrVal"></b></label>
+          <input id="thr" type="range" min="0.30" max="0.70" step="0.01">
+          <div class="small" style="margin:6px 0 12px">높을수록 엄격(오인식↓, 오거부↑). w600k_mbf 기준 0.40~0.50 권장.</div>
+          <label for="modelUrl">임베딩 모델(ONNX) URL</label>
+          <input id="modelUrl" type="text">
+          <div class="small" style="margin:6px 0">또는 로컬 파일 선택 (MobileFaceNet 계열, 입력 1×3×112×112 RGB, 출력 임베딩):</div>
+          <input id="modelFile" type="file" accept=".onnx">
+          <div class="btns"><button id="btnReloadModel" class="sec">모델 다시 로드</button></div>
+          <div style="margin-top:14px" class="small"><b>최근 로그</b></div>
+          <table><tbody id="logRows"></tbody></table>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div class="small" style="margin-top:8px">
+    ⚠️ 학습/데모용입니다. 모든 처리가 브라우저 안에서만 이루어지므로 서버 없는 환경에서의 인증은 실제 보안 경계가 될 수 없습니다.
+    키(비추출형 CryptoKey)와 데이터가 같은 오리진에 저장되므로, 같은 오리진에서 스크립트를 실행할 수 있는 공격자는 인증 로직을 우회할 수 있습니다.
+    라이브니스는 6개 키포인트 기반 고개 회전 챌린지이며, 영상 재생·3D 마스크 공격까지 막지는 못합니다.
+    카메라는 <code>https://</code> 또는 <code>http://localhost</code>에서만 동작합니다.
+  </div>
+</div>
+
+<script type="module">
+/* =========================================================
+ * 설정
+ * ======================================================= */
+const MP_VER = '0.10.14';
+const ORT_VER = '1.18.0';
+const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
+const ORT_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VER}/dist/`;
+const DETECTOR_URL = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
+const DEFAULT_MODEL_URL = 'https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx'; // insightface w600k_mbf (MobileFaceNet)
+const MODEL_ID = 'w600k_mbf';
+const EMB_DIM = 512;
+
+const CFG = {
+  ENROLL_SAMPLES: 5,           // 등록 시 정면 임베딩 수
+  AUTH_SAMPLES: 3,             // 인증 시 정면 임베딩 수
+  SAMPLE_GAP_MS: 400,
+  PHASE_A_TIMEOUT_MS: 25000,   // 정면 촬영 제한 시간
+  CHALLENGE_TIMEOUT_MS: 8000,  // 챌린지 1회 제한 시간
+  NEUTRAL_U: 0.08,             // 정면 판정 |u|
+  TURN_U: 0.16,                // 회전 판정 |u| (약 25도)
+  TURN_FRAMES: 3,              // 연속 프레임 수
+  MIN_DET_SCORE: 0.6,
+  MIN_FACE_W: 0.18, MAX_FACE_W: 0.75,   // 프레임 폭 대비 얼굴 폭
+  MAX_ROLL_DEG: 20,
+  LUM_MIN: 45, LUM_MAX: 215,
+  SELF_CONSISTENCY_MIN: 0.5,   // 같은 세션 정면 샘플 간 평균 유사도
+  PEAK_IDENTITY_MIN: 0.30,     // 고개 돌린 상태에서 정면 대비 유사도(얼굴 교체 방지)
+  DEFAULT_THRESHOLD: 0.45,
+  MAX_FAILS: 5,                // 연속 실패 허용 횟수
+  LOCK_BASE_MS: 30000,         // 잠금 기본 시간(30초, 잠금 반복 시 2배씩)
+  LOCK_MAX_MS: 30 * 60000,
+};
+
+// ArcFace 112x112 기준 템플릿 (왼눈, 오른눈, 코끝, 입 중앙)
+const TEMPLATE = [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366], [56.1396, 92.2848]];
+
+/* =========================================================
+ * 유틸
+ * ======================================================= */
+const $ = (id) => document.getElementById(id);
+const els = {
+  video: $('video'), overlay: $('overlay'), stage: $('stage'), prompt: $('prompt'), aligned: $('aligned'),
+  btnCam: $('btnCam'), btnCancel: $('btnCancel'), btnEnroll: $('btnEnroll'), btnAuth: $('btnAuth'),
+  enrollId: $('enrollId'), authId: $('authId'), steps: $('steps'),
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nextRaf = () => new Promise((r) => requestAnimationFrame(r));
+function setChip(id, cls, text) { const e = $(id); e.className = 'chip ' + cls; e.textContent = text; }
+function showBanner(id, msg) { const e = $(id); e.textContent = msg; e.classList.toggle('show', !!msg); }
+function setPrompt(t) { els.prompt.textContent = t; }
+function toHex(buf) { return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join(''); }
+
+function dot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+function l2norm(v) {
+  let s = 0; for (let i = 0; i < v.length; i++) s += v[i] * v[i];
+  const n = Math.sqrt(s) || 1; const o = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) o[i] = v[i] / n; return o;
+}
+const cosine = (a, b) => dot(l2norm(a), l2norm(b));   // 정규화 후 내적 = 코사인 유사도
+function meanVec(list) {
+  const o = new Float32Array(list[0].length);
+  for (const v of list) for (let i = 0; i < o.length; i++) o[i] += v[i];
+  return l2norm(o);
+}
+
+/* =========================================================
+ * IndexedDB
+ * ======================================================= */
+const DB_NAME = 'web_cert2', DB_VER = 1;
+let dbp;
+function openDB() {
+  if (dbp) return dbp;
+  dbp = new Promise((resolve, reject) => {
+    const rq = indexedDB.open(DB_NAME, DB_VER);
+    rq.onupgradeneeded = () => {
+      const db = rq.result;
+      db.createObjectStore('users', { keyPath: 'userId' });
+      db.createObjectStore('keys', { keyPath: 'id' });
+      db.createObjectStore('meta', { keyPath: 'key' });
+      db.createObjectStore('models', { keyPath: 'name' });
+      db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+    };
+    rq.onsuccess = () => resolve(rq.result);
+    rq.onerror = () => reject(rq.error);
+  });
+  return dbp;
+}
+async function store(name, mode, fn) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(name, mode);
+    const rq = fn(tx.objectStore(name));
+    tx.oncomplete = () => resolve(rq && rq.result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+const dbGet = (s, k) => store(s, 'readonly', (o) => o.get(k));
+const dbPut = (s, v) => store(s, 'readwrite', (o) => o.put(v));
+const dbDel = (s, k) => store(s, 'readwrite', (o) => o.delete(k));
+const dbAll = (s) => store(s, 'readonly', (o) => o.getAll());
+
+/* =========================================================
+ * Web Crypto: AES-256-GCM (비추출형 키를 IndexedDB에 보관)
+ * ======================================================= */
+async function getMasterKey() {
+  const rec = await dbGet('keys', 'master');
+  if (rec) return rec.key;
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  await dbPut('keys', { id: 'master', key });
+  return key;
+}
+const aad = (uid) => new TextEncoder().encode(`${uid}|${MODEL_ID}|${EMB_DIM}`);
+async function encryptTemplate(uid, floats) {
+  const key = await getMasterKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(uid), tagLength: 128 }, key, floats.buffer);
+  return { iv, cipher };
+}
+async function decryptTemplate(rec) {
+  const key = await getMasterKey();
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: rec.iv, additionalData: aad(rec.userId), tagLength: 128 }, key, rec.cipher);
+  const all = new Float32Array(plain);
+  const out = [];
+  for (let i = 0; i + EMB_DIM <= all.length; i += EMB_DIM) out.push(all.slice(i, i + EMB_DIM));
+  return out;
+}
+
+/* =========================================================
+ * 로그 / 설정 / 실패 제한
+ * ======================================================= */
+async function addLog(user, type, ok, detail) {
+  await dbPut('logs', { t: Date.now(), user, type, ok, detail });
+  const all = await dbAll('logs');
+  for (const l of all.slice(0, Math.max(0, all.length - 30))) await dbDel('logs', l.id);
+  renderLogs();
+}
+async function renderLogs() {
+  const all = (await dbAll('logs')).reverse().slice(0, 12);
+  const tb = $('logRows'); tb.textContent = '';
+  for (const l of all) {
+    const tr = document.createElement('tr');
+    const cells = [new Date(l.t).toLocaleTimeString(), l.user, l.type, l.detail];
+    cells.forEach((c) => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+    tr.children[2].className = l.ok ? 'ok' : 'bad';
+    tb.appendChild(tr);
+  }
+}
+async function getThreshold() { const r = await dbGet('meta', 'threshold'); return r ? r.value : CFG.DEFAULT_THRESHOLD; }
+
+const lockKey = (uid) => 'lock:' + uid;
+async function getLock(uid) {
+  return (await dbGet('meta', lockKey(uid))) || { key: lockKey(uid), failures: 0, lockCount: 0, lockedUntil: 0 };
+}
+// 시도 시작 시점에 실패로 선기록(write-ahead) → 새로고침/중단으로 횟수를 회피할 수 없음
+async function commitAttempt(uid) {
+  const before = await getLock(uid);
+  const rec = { ...before, failures: before.failures + 1 };
+  if (rec.failures >= CFG.MAX_FAILS) {
+    rec.lockCount += 1;
+    rec.lockedUntil = Date.now() + Math.min(CFG.LOCK_BASE_MS * 2 ** (rec.lockCount - 1), CFG.LOCK_MAX_MS);
+    rec.failures = 0;
+  }
+  await dbPut('meta', rec);
+  return before;
+}
+const restoreLock = (before) => dbPut('meta', before);
+const clearLock = (uid) => dbPut('meta', { key: lockKey(uid), failures: 0, lockCount: 0, lockedUntil: 0 });
+const fmtSec = (ms) => { const s = Math.ceil(ms / 1000); return s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`; };
+
+/* =========================================================
+ * 라이브러리 / 모델 로딩
+ * ======================================================= */
+const S = { detector: null, ort: null, ortSession: null, ortInput: null, ready: { mp: false, ort: false, model: false }, stream: null, busy: false, session: null };
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('스크립트 로드 실패: ' + src));
+    document.head.appendChild(s);
+  });
+}
+function updateButtons() {
+  const ok = S.ready.mp && S.ready.ort && S.ready.model && !!S.stream && !S.busy;
+  els.btnEnroll.disabled = !ok; els.btnAuth.disabled = !ok || !els.authId.value;
+  els.btnCancel.disabled = !S.busy; els.btnCam.disabled = S.busy;
+}
+
+async function initDetector() {
+  setChip('chipMp', 'load', 'MediaPipe 로딩 중…');
+  try {
+    const { FaceDetector, FilesetResolver } = await import(`${MP_BASE}/vision_bundle.mjs`);
+    const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+    S.detector = await FaceDetector.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: DETECTOR_URL, delegate: 'CPU' },
+      runningMode: 'VIDEO', minDetectionConfidence: CFG.MIN_DET_SCORE,
+    });
+    S.ready.mp = true; setChip('chipMp', 'ok', 'MediaPipe Face Detector ✓');
+  } catch (e) { console.error(e); setChip('chipMp', 'fail', 'MediaPipe 실패'); showBanner('bannerErr', '얼굴 검출기 로드 실패: ' + e.message); }
+}
+async function initOrt() {
+  setChip('chipOrt', 'load', 'ONNX Runtime 로딩 중…');
+  try {
+    await loadScript(`${ORT_BASE}ort.min.js`);
+    S.ort = window.ort;
+    S.ort.env.wasm.wasmPaths = ORT_BASE;
+    S.ort.env.wasm.numThreads = 1;      // SharedArrayBuffer(COOP/COEP) 없이 동작
+    S.ort.env.wasm.proxy = false;
+    S.ready.ort = true; setChip('chipOrt', 'ok', `ONNX Runtime Web ${ORT_VER} (WASM) ✓`);
+  } catch (e) { console.error(e); setChip('chipOrt', 'fail', 'ONNX Runtime 실패'); showBanner('bannerErr', e.message); }
+}
+async function fetchModel(url) {
+  const cached = await dbGet('models', url);
+  if (cached) return cached.buf;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`모델 다운로드 실패 (HTTP ${resp.status})`);
+  const total = +resp.headers.get('content-length') || 0;
+  const reader = resp.body.getReader(); const chunks = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    chunks.push(value); got += value.length;
+    setChip('chipModel', 'load', total ? `모델 다운로드 ${Math.round(got / total * 100)}%` : `모델 다운로드 ${(got / 1048576).toFixed(1)}MB`);
+  }
+  const buf = new Uint8Array(got); let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+  await dbPut('models', { name: url, buf: buf.buffer });
+  return buf.buffer;
+}
+async function createEmbSession(buf, label) {
+  S.ortSession = await S.ort.InferenceSession.create(new Uint8Array(buf), { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  S.ortInput = S.ortSession.inputNames[0];
+  const out = await runEmbedding(new Float32Array(3 * 112 * 112));   // 워밍업 + 차원 확인
+  if (out.length !== EMB_DIM) throw new Error(`임베딩 차원 불일치: ${out.length} (기대 ${EMB_DIM})`);
+  S.ready.model = true; setChip('chipModel', 'ok', `MobileFaceNet ${label} ✓`);
+}
+async function initModel(fileBuf) {
+  if (!S.ready.ort) return;
+  S.ready.model = false; updateButtons();
+  setChip('chipModel', 'load', 'MobileFaceNet 로딩 중…');
+  try {
+    if (fileBuf) await createEmbSession(fileBuf, '(로컬 파일)');
+    else { const url = $('modelUrl').value.trim() || DEFAULT_MODEL_URL; await createEmbSession(await fetchModel(url), `(${EMB_DIM}-d)`); }
+  } catch (e) {
+    console.error(e); setChip('chipModel', 'fail', '모델 실패');
+    showBanner('bannerErr', '임베딩 모델 로드 실패: ' + e.message + ' — 설정에서 URL 또는 로컬 .onnx 파일을 지정하세요.');
+  }
+  updateButtons();
+}
+
+async function runEmbedding(chw) {
+  const t = new S.ort.Tensor('float32', chw, [1, 3, 112, 112]);
+  const out = await S.ortSession.run({ [S.ortInput]: t });
+  return l2norm(out[S.ortSession.outputNames[0]].data);   // L2 정규화
+}
+
+/* =========================================================
+ * 카메라
+ * ======================================================= */
+async function toggleCamera() {
+  if (S.stream) { stopCamera(); return; }
+  try {
+    S.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    els.video.srcObject = S.stream; await els.video.play();
+    els.overlay.width = els.video.videoWidth; els.overlay.height = els.video.videoHeight;
+    setChip('chipCam', 'ok', '카메라 켜짐'); els.btnCam.textContent = '카메라 끄기'; setPrompt('준비되었습니다');
+    previewLoop();
+  } catch (e) {
+    S.stream = null; setChip('chipCam', 'fail', '카메라 실패');
+    showBanner('bannerErr', '카메라를 사용할 수 없습니다: ' + e.name + ' — 권한과 HTTPS/localhost 여부를 확인하세요.');
+  }
+  updateButtons();
+}
+function stopCamera() {
+  S.session && (S.session.cancel = true);
+  if (S.stream) S.stream.getTracks().forEach((t) => t.stop());
+  S.stream = null; els.video.srcObject = null;
+  els.overlay.getContext('2d').clearRect(0, 0, els.overlay.width, els.overlay.height);
+  setChip('chipCam', '', '카메라 꺼짐'); els.btnCam.textContent = '카메라 켜기'; setPrompt('카메라를 켜세요');
+  updateButtons();
+}
+
+/* =========================================================
+ * 얼굴 검출 + 기준점 분석
+ * ======================================================= */
+let lastTs = 0;
+function analyze() {
+  const v = els.video;
+  if (!S.detector || !S.stream || v.readyState < 2 || !v.videoWidth) return null;
+  let ts = performance.now(); if (ts <= lastTs) ts = lastTs + 1; lastTs = ts;
+  const W = v.videoWidth, H = v.videoHeight;
+  if (els.overlay.width !== W) { els.overlay.width = W; els.overlay.height = H; }
+  const dets = S.detector.detectForVideo(v, ts).detections || [];
+  const out = { n: dets.length, ok: false, msg: '', u: 0 };
+  drawOverlay(dets, W, H);
+  if (!dets.length) { out.msg = '얼굴이 보이지 않습니다'; return out; }
+  if (dets.length > 1) { out.msg = '화면에는 한 명만 나와야 합니다'; return out; }
+  const d = dets[0], bb = d.boundingBox;
+  if (!d.keypoints || d.keypoints.length < 4) { out.msg = '기준점을 찾지 못했습니다'; return out; }
+  // BlazeFace 키포인트: 0 눈, 1 눈, 2 코끝, 3 입 중앙, 4/5 귀
+  const kp = d.keypoints.map((k) => [k.x * W, k.y * H]);
+  const eyes = [kp[0], kp[1]].sort((a, b) => a[0] - b[0]);   // 영상 기준 왼쪽 → 오른쪽
+  const [eA, eB] = eyes, nose = kp[2], mouth = kp[3];
+  const ax = eB[0] - eA[0], ay = eB[1] - eA[1], ied = Math.hypot(ax, ay) || 1;
+  const mid = [(eA[0] + eB[0]) / 2, (eA[1] + eB[1]) / 2];
+  // u: 눈 중점 대비 코의 좌우 이동량 / 눈 간격 (원본 영상 기준 +는 사용자 왼쪽)
+  // 평면 사진은 회전해도 u가 거의 0이므로 3D 얼굴과 구분하는 단서가 된다.
+  const u = ((nose[0] - mid[0]) * ax + (nose[1] - mid[1]) * ay) / (ied * ied);
+  const roll = Math.atan2(ay, ax) * 180 / Math.PI;
+  const score = d.categories?.[0]?.score ?? 0;
+  const wr = bb.width / W, cx = (bb.originX + bb.width / 2) / W, cy = (bb.originY + bb.height / 2) / H;
+  let msg = '';
+  if (wr < CFG.MIN_FACE_W) msg = '얼굴이 너무 작습니다 — 가까이 오세요';
+  else if (wr > CFG.MAX_FACE_W) msg = '얼굴이 너무 큽니다 — 멀어지세요';
+  else if (cx < 0.25 || cx > 0.75 || cy < 0.2 || cy > 0.8) msg = '얼굴을 가이드 안쪽으로 맞춰 주세요';
+  else if (Math.abs(roll) > CFG.MAX_ROLL_DEG) msg = '고개를 기울이지 마세요';
+  else if (ied / bb.width < 0.25) msg = '얼굴 기준점이 불안정합니다';
+  Object.assign(out, { ok: !msg, msg, u, bb, kp: [eA, eB, nose, mouth], score, ied });
+  return out;
+}
+function drawOverlay(dets, W, H) {
+  const c = els.overlay.getContext('2d'); c.clearRect(0, 0, W, H);
+  c.lineWidth = 3; c.strokeStyle = dets.length === 1 ? '#4cd37b' : '#ffb020'; c.fillStyle = '#ffd84d';
+  for (const d of dets) {
+    const b = d.boundingBox; c.strokeRect(b.originX, b.originY, b.width, b.height);
+    for (const k of d.keypoints || []) { c.beginPath(); c.arc(k.x * W, k.y * H, 4, 0, 7); c.fill(); }
+  }
+}
+function updateMeter(a) {
+  const u = a && a.n === 1 ? a.u : 0;
+  const pos = 50 - Math.max(-0.4, Math.min(0.4, u)) / 0.4 * 50;   // 화면(거울) 기준 좌우
+  $('yawDot').style.left = pos + '%';
+  els.stage.classList.toggle('good', !!(a && a.ok && Math.abs(a.u) < CFG.NEUTRAL_U));
+}
+function initMeter() {
+  const p = (u) => 50 - u / 0.4 * 50;
+  $('yawZone').style.left = p(CFG.NEUTRAL_U) + '%'; $('yawZone').style.width = (p(-CFG.NEUTRAL_U) - p(CFG.NEUTRAL_U)) + '%';
+  $('tickL').style.left = p(CFG.TURN_U) + '%'; $('tickR').style.left = p(-CFG.TURN_U) + '%';
+}
+async function previewLoop() {
+  while (S.stream) {
+    await nextRaf();
+    if (S.busy) continue;
+    const a = analyze(); updateMeter(a);
+    if (a && !a.ok && a.msg) setPrompt(a.msg); else if (a) setPrompt('정상 인식 중');
+    await sleep(60);
+  }
+}
+
+/* =========================================================
+ * 정렬(Canvas) + 임베딩
+ * ======================================================= */
+// 4점(눈 2, 코, 입) 최소제곱 유사변환 (회전+균일 스케일+이동)
+function similarity(src, dst) {
+  const n = src.length; let sx = 0, sy = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) { sx += src[i][0]; sy += src[i][1]; dx += dst[i][0]; dy += dst[i][1]; }
+  sx /= n; sy /= n; dx /= n; dy /= n;
+  let na = 0, nb = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    const x = src[i][0] - sx, y = src[i][1] - sy, X = dst[i][0] - dx, Y = dst[i][1] - dy;
+    na += x * X + y * Y; nb += x * Y - y * X; den += x * x + y * y;
+  }
+  const a = na / den, b = nb / den;
+  return { a, b, tx: dx - (a * sx - b * sy), ty: dy - (b * sx + a * sy) };
+}
+const alignCtx = els.aligned.getContext('2d', { willReadFrequently: true });
+function alignFace(a) {
+  const { a: sa, b, tx, ty } = similarity(a.kp, TEMPLATE);
+  alignCtx.setTransform(1, 0, 0, 1, 0, 0); alignCtx.fillStyle = '#000'; alignCtx.fillRect(0, 0, 112, 112);
+  alignCtx.imageSmoothingQuality = 'high';
+  alignCtx.setTransform(sa, b, -b, sa, tx, ty);       // x' = a·x − b·y + tx, y' = b·x + a·y + ty
+  alignCtx.drawImage(els.video, 0, 0);
+  alignCtx.setTransform(1, 0, 0, 1, 0, 0);
+  return alignCtx.getImageData(0, 0, 112, 112).data;
+}
+// 반환: Float32Array(512) 또는 null(조명 불량)
+async function embedFace(a) {
+  const px = alignFace(a);
+  const chw = new Float32Array(3 * 112 * 112); let lum = 0;
+  for (let i = 0; i < 112 * 112; i++) {
+    const r = px[i * 4], g = px[i * 4 + 1], bl = px[i * 4 + 2];
+    chw[i] = (r - 127.5) / 127.5; chw[112 * 112 + i] = (g - 127.5) / 127.5; chw[2 * 112 * 112 + i] = (bl - 127.5) / 127.5;
+    lum += 0.299 * r + 0.587 * g + 0.114 * bl;
+  }
+  lum /= 112 * 112;
+  if (lum < CFG.LUM_MIN) { setPrompt('너무 어둡습니다 — 조명을 밝게 해 주세요'); return null; }
+  if (lum > CFG.LUM_MAX) { setPrompt('너무 밝습니다 — 역광/과노출을 피하세요'); return null; }
+  return runEmbedding(chw);
+}
+
+/* =========================================================
+ * 세션: 정면 샘플 → 라이브니스 챌린지 → 최종 확인
+ * ======================================================= */
+class SessionError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
+
+function renderSteps(list) {
+  els.steps.textContent = '';
+  list.forEach((s) => { const e = document.createElement('span'); e.className = 'step ' + (s.state || ''); e.textContent = s.label; els.steps.appendChild(e); });
+}
+async function frame(sess) {
+  for (;;) {
+    await nextRaf();
+    if (sess.cancel) throw new SessionError('CANCEL', '사용자가 중단했습니다');
+    if (!S.stream) throw new SessionError('CANCEL', '카메라가 꺼졌습니다');
+    const a = analyze();
+    if (a) { updateMeter(a); return a; }
+  }
+}
+const DIR_TEXT = { left: '◀ 고개를 천천히 화면 왼쪽으로 돌리세요', right: '고개를 천천히 화면 오른쪽으로 돌리세요 ▶' };
+function randomChallenges() {
+  const n = 2 + crypto.getRandomValues(new Uint8Array(1))[0] % 2;       // 2~3회
+  let d = crypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'left' : 'right';
+  const seq = [];
+  for (let i = 0; i < n; i++) { seq.push(d); d = d === 'left' ? 'right' : 'left'; }
+  return seq;
+}
+
+async function runSession(kind) {
+  const sess = { cancel: false, committed: false };
+  S.session = sess;
+  const need = kind === 'enroll' ? CFG.ENROLL_SAMPLES : CFG.AUTH_SAMPLES;
+  const chall = randomChallenges();
+  const steps = [{ label: `정면 촬영 0/${need}`, state: 'cur' }, ...chall.map((_, i) => ({ label: `동작 ${i + 1}` })), { label: '최종 확인' }];
+  renderSteps(steps);
+  const mark = (i, st) => { steps[i].state = st; renderSteps(steps); };
+
+  /* A. 정면 샘플 수집 */
+  const samples = []; let lastAt = 0; const tA = performance.now();
+  while (samples.length < need) {
+    if (performance.now() - tA > CFG.PHASE_A_TIMEOUT_MS) throw new SessionError('NO_PROBE', '정면 얼굴을 충분히 얻지 못했습니다 (시간 초과)');
+    const a = await frame(sess);
+    if (!a.ok) { setPrompt(a.msg); continue; }
+    if (Math.abs(a.u) > CFG.NEUTRAL_U) { setPrompt('정면을 바라보세요'); continue; }
+    setPrompt(`정면을 유지하세요 (${samples.length}/${need})`);
+    if (performance.now() - lastAt < CFG.SAMPLE_GAP_MS) continue;
+    const e = await embedFace(a); if (!e) continue;
+    samples.push(e); lastAt = performance.now();
+    steps[0].label = `정면 촬영 ${samples.length}/${need}`; renderSteps(steps);
+  }
+  sess.committed = true;       // 이 시점부터는 중단해도 실패로 집계
+  const probe = meanVec(samples);
+  let consistency = 0, pairs = 0;
+  for (let i = 0; i < samples.length; i++) for (let j = i + 1; j < samples.length; j++) { consistency += cosine(samples[i], samples[j]); pairs++; }
+  consistency /= pairs;
+  if (consistency < CFG.SELF_CONSISTENCY_MIN) throw new SessionError('INCONSISTENT', `촬영된 얼굴이 일관되지 않습니다 (${consistency.toFixed(2)})`);
+  mark(0, 'done');
+
+  /* B. 라이브니스 챌린지: 정면 복귀 → 무작위 방향 지시 → 회전 확인 */
+  for (let ci = 0; ci < chall.length; ci++) {
+    const dir = chall[ci], si = ci + 1; mark(si, 'cur');
+    const tN = performance.now();
+    for (;;) {                      // 정면 복귀 대기 (회전 상태에서 시작하는 재생 공격 방지)
+      if (performance.now() - tN > CFG.CHALLENGE_TIMEOUT_MS) { mark(si, 'bad'); throw new SessionError('LIVENESS', '정면 복귀 시간 초과'); }
+      const a = await frame(sess);
+      if (a.n === 1 && a.ok && Math.abs(a.u) < CFG.NEUTRAL_U) break;
+      setPrompt(ci === 0 ? '정면을 바라보세요' : '정면으로 돌아오세요');
+    }
+    setPrompt(DIR_TEXT[dir]);
+    const t0 = performance.now(); let hit = 0;
+    for (;;) {
+      if (performance.now() - t0 > CFG.CHALLENGE_TIMEOUT_MS) { mark(si, 'bad'); throw new SessionError('LIVENESS', '지시한 동작이 확인되지 않았습니다 (시간 초과)'); }
+      const a = await frame(sess);
+      if (a.n !== 1 || !a.kp) { hit = 0; continue; }
+      const s = dir === 'left' ? a.u : -a.u;           // 원본 영상 기준 + = 사용자 왼쪽
+      hit = s >= CFG.TURN_U ? hit + 1 : 0;
+      if (hit >= CFG.TURN_FRAMES) {
+        const e = await embedFace(a);
+        if (e && cosine(e, probe) < CFG.PEAK_IDENTITY_MIN) { mark(si, 'bad'); throw new SessionError('LIVENESS', '동작 중 다른 얼굴이 감지되었습니다'); }
+        if (e) break;
+      }
+    }
+    mark(si, 'done');
+  }
+
+  /* C. 최종 정면 확인 (끝에서 얼굴이 바뀌는 공격 방지) */
+  const last = steps.length - 1; mark(last, 'cur');
+  const finals = []; const tF = performance.now();
+  while (finals.length < 2) {
+    if (performance.now() - tF > CFG.CHALLENGE_TIMEOUT_MS + 4000) { mark(last, 'bad'); throw new SessionError('LIVENESS', '최종 정면 확인 시간 초과'); }
+    const a = await frame(sess);
+    if (!a.ok || Math.abs(a.u) > CFG.NEUTRAL_U) { setPrompt('정면으로 돌아오세요'); continue; }
+    setPrompt('정면을 유지하세요');
+    const e = await embedFace(a); if (e) finals.push(e);
+  }
+  mark(last, 'done');
+  return { samples, probe, final: meanVec(finals), consistency };
+}
+
+async function withSession(fn) {
+  if (S.busy) return;
+  S.busy = true; updateButtons();
+  try { return await fn(); }
+  finally { S.busy = false; S.session = null; updateButtons(); setPrompt('준비되었습니다'); }
+}
+
+function showResult(id, ok, text) { const e = $(id); e.className = 'result show ' + (ok ? 'ok' : 'bad'); e.textContent = text; }
+
+/* =========================================================
+ * 등록
+ * ======================================================= */
+const validId = (s) => /^[A-Za-z0-9가-힣_.-]{2,32}$/.test(s);
+async function enroll() {
+  const uid = els.enrollId.value.trim();
+  if (!validId(uid)) return showResult('enrollResult', false, 'ID는 2~32자의 한글/영문/숫자/_.- 만 사용할 수 있습니다.');
+  if (await dbGet('users', uid)) return showResult('enrollResult', false, '이미 등록된 ID입니다. 먼저 삭제하세요.');
+  $('enrollResult').className = 'result';
+  await withSession(async () => {
+    try {
+      const r = await runSession('enroll');
+      const thr = await getThreshold();
+      const sim = cosine(r.final, r.probe);
+      if (sim < thr) throw new SessionError('INCONSISTENT', `동작 전후 얼굴이 일치하지 않습니다 (${sim.toFixed(2)} < ${thr.toFixed(2)})`);
+      const flat = new Float32Array(r.samples.length * EMB_DIM);
+      r.samples.forEach((s, i) => flat.set(s, i * EMB_DIM));
+      const { iv, cipher } = await encryptTemplate(uid, flat);
+      await dbPut('users', { userId: uid, model: MODEL_ID, dim: EMB_DIM, count: r.samples.length, iv, cipher, createdAt: Date.now(), authCount: 0, lastAuth: 0 });
+      await addLog(uid, '등록', true, `샘플 ${r.samples.length}, 일관성 ${r.consistency.toFixed(2)}`);
+      showResult('enrollResult', true, `✅ "${uid}" 등록 완료\n정면 샘플 ${r.samples.length}개 · 일관성 ${r.consistency.toFixed(2)}\nAES-256-GCM으로 암호화되어 IndexedDB에 저장되었습니다. (${cipher.byteLength} bytes, iv ${toHex(iv)})`);
+      els.enrollId.value = '';
+      await refreshUsers();
+    } catch (e) {
+      if (!(e instanceof SessionError)) console.error(e);
+      await addLog(uid, '등록', false, e.message);
+      showResult('enrollResult', false, '❌ 등록 실패: ' + e.message);
+    }
+  });
+}
+
+/* =========================================================
+ * 인증
+ * ======================================================= */
+async function lockStatus(uid) {
+  const l = await getLock(uid); const rem = l.lockedUntil - Date.now();
+  return { l, rem };
+}
+async function authenticate() {
+  const uid = els.authId.value; if (!uid) return;
+  const rec = await dbGet('users', uid); if (!rec) return showResult('authResult', false, '등록된 사용자가 아닙니다.');
+  const { rem } = await lockStatus(uid);
+  if (rem > 0) return showResult('authResult', false, `🔒 연속 실패로 잠금 상태입니다. ${fmtSec(rem)} 후 다시 시도하세요.`);
+  $('authResult').className = 'result'; $('scoreBar').style.display = 'none';
+  await withSession(async () => {
+    const before = await commitAttempt(uid);      // 선기록
+    let ok = false, msg = '';
+    try {
+      const templ = meanVec(await decryptTemplate(rec).catch(() => { throw new SessionError('CRYPTO', '템플릿 복호화 실패 (데이터 변조 또는 키 불일치)'); }));
+      const r = await runSession('auth');
+      const thr = await getThreshold();
+      const sProbe = cosine(r.probe, templ), sFinal = cosine(r.final, templ);
+      const score = Math.min(sProbe, sFinal);
+      ok = score >= thr;
+      $('scoreBar').style.display = 'block';
+      $('scoreFill').style.width = Math.max(0, Math.min(1, score)) * 100 + '%';
+      $('scoreFill').style.background = ok ? '#2fb36d' : '#e5484d';
+      $('scoreThr').style.left = thr * 100 + '%';
+      msg = `유사도 ${score.toFixed(3)} (정면 ${sProbe.toFixed(3)} / 최종 ${sFinal.toFixed(3)}), 임계값 ${thr.toFixed(2)}`;
+      if (ok) {
+        await clearLock(uid);
+        rec.authCount = (rec.authCount || 0) + 1; rec.lastAuth = Date.now(); await dbPut('users', rec);
+        await addLog(uid, '인증', true, `score ${score.toFixed(3)}`);
+        showResult('authResult', true, `✅ 인증 성공 — ${uid}\n${msg}`);
+      } else {
+        await addLog(uid, '인증', false, `불일치 ${score.toFixed(3)}`);
+        showResult('authResult', false, `❌ 인증 실패 — 얼굴 불일치\n${msg}`);
+      }
+    } catch (e) {
+      if (!(e instanceof SessionError)) console.error(e);
+      if (!(S.session && S.session.committed) && (e.code === 'NO_PROBE' || e.code === 'CANCEL')) await restoreLock(before);   // 아무도 제시되지 않은 시도는 집계 제외
+      await addLog(uid, '인증', false, e.message);
+      showResult('authResult', false, '❌ 인증 실패: ' + e.message);
+    }
+    await refreshUsers();
+  });
+}
+
+/* =========================================================
+ * 사용자 목록 / 잠금 표시
+ * ======================================================= */
+async function refreshUsers() {
+  const users = (await dbAll('users')).sort((a, b) => a.createdAt - b.createdAt);
+  const prev = els.authId.value;
+  els.authId.textContent = '';
+  users.forEach((u) => { const o = document.createElement('option'); o.value = u.userId; o.textContent = u.userId; els.authId.appendChild(o); });
+  if (users.some((u) => u.userId === prev)) els.authId.value = prev;
+  const tb = $('userRows'); tb.textContent = '';
+  for (const u of users) {
+    const tr = document.createElement('tr');
+    [u.userId, new Date(u.createdAt).toLocaleString(), String(u.authCount || 0)].forEach((t) => { const td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
+    const td = document.createElement('td'); const b = document.createElement('button');
+    b.className = 'danger'; b.style.padding = '4px 8px'; b.style.fontSize = '12px'; b.textContent = '삭제';
+    b.onclick = () => removeUser(u.userId); td.appendChild(b); tr.appendChild(td); tb.appendChild(tr);
+  }
+  $('noUsers').style.display = users.length ? 'none' : 'block';
+  updateButtons(); updateLockInfo();
+}
+async function removeUser(uid) {
+  const { rem } = await lockStatus(uid);
+  if (rem > 0) return alert(`잠금 중에는 삭제할 수 없습니다. (${fmtSec(rem)} 남음)`);
+  if (!confirm(`"${uid}" 사용자를 삭제할까요?`)) return;
+  await dbDel('users', uid); await dbDel('meta', lockKey(uid));
+  await addLog(uid, '삭제', true, '템플릿 삭제'); await refreshUsers();
+}
+async function updateLockInfo() {
+  const uid = els.authId.value; const info = $('lockInfo');
+  if (!uid) { info.textContent = ''; return; }
+  const { l, rem } = await lockStatus(uid);
+  if (rem > 0) { info.textContent = `🔒 잠금: ${fmtSec(rem)} 남음`; els.btnAuth.disabled = true; }
+  else {
+    info.textContent = `남은 시도: ${CFG.MAX_FAILS - l.failures}/${CFG.MAX_FAILS} (연속 실패 ${CFG.MAX_FAILS}회 시 ${fmtSec(CFG.LOCK_BASE_MS * 2 ** l.lockCount)} 잠금)`;
+    const ok = S.ready.mp && S.ready.ort && S.ready.model && !!S.stream && !S.busy; els.btnAuth.disabled = !ok;
+  }
+}
+
+/* =========================================================
+ * 초기화
+ * ======================================================= */
+async function main() {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    showBanner('bannerErr', '이 페이지는 보안 컨텍스트(https 또는 http://localhost)에서 열어야 카메라/암호화 API를 사용할 수 있습니다. 예: python3 -m http.server 8000');
+    els.btnCam.disabled = true;
+  }
+  $('modelUrl').value = DEFAULT_MODEL_URL;
+  const thr = await getThreshold(); $('thr').value = thr; $('thrVal').textContent = (+thr).toFixed(2);
+  $('thr').oninput = async (e) => { $('thrVal').textContent = (+e.target.value).toFixed(2); await dbPut('meta', { key: 'threshold', value: +e.target.value }); };
+  initMeter(); await refreshUsers(); await renderLogs();
+  els.btnCam.onclick = toggleCamera;
+  els.btnCancel.onclick = () => S.session && (S.session.cancel = true);
+  els.btnEnroll.onclick = enroll; els.btnAuth.onclick = authenticate;
+  els.authId.onchange = updateLockInfo;
+  $('btnReloadModel').onclick = async () => {
+    const f = $('modelFile').files[0];
+    showBanner('bannerErr', '');
+    await initModel(f ? await f.arrayBuffer() : null);
+  };
+  setInterval(updateLockInfo, 1000);
+  window.addEventListener('beforeunload', () => S.stream && S.stream.getTracks().forEach((t) => t.stop()));
+  await Promise.all([initDetector(), initOrt().then(() => initModel())]);
+  updateButtons();
+}
+main();
+</script>
+</body>
+</html>

@@ -247,4 +247,28 @@ MIT License - 자유롭게 사용하세요!
 
 ---
 
+## 🙂 web_cert2.html — 카메라 얼굴 인증
+
+`web_cert01.html`(WebAuthn)과 별개로, 카메라 영상만으로 얼굴을 등록/인증하는 단일 페이지 데모입니다.
+
+```bash
+python3 -m http.server 8000   # http://localhost:8000/web_cert2.html (카메라는 https 또는 localhost 필요)
+```
+
+| 단계 | 기술 |
+|------|------|
+| 카메라 | `MediaDevices.getUserMedia()` |
+| 얼굴 검출 | MediaPipe Face Detector (BlazeFace) |
+| 얼굴 정렬 | 눈·코·입 4점 유사변환 + Canvas → 112×112 |
+| 임베딩 | MobileFaceNet(insightface `w600k_mbf`, ONNX, 512-d) |
+| 웹 추론 | ONNX Runtime Web (WASM) |
+| 비교 | L2 정규화 + 코사인 유사도 (기본 임계값 0.45) |
+| 저장 | IndexedDB (임베딩은 AES-256-GCM 암호화, 비추출형 키) |
+| 위조 방지 | 무작위 고개 회전 챌린지 + 동작 중 동일인 검증 + 연속 5회 실패 시 지수 증가 잠금 |
+
+- 최초 실행 시 임베딩 모델(약 13MB)을 내려받아 IndexedDB에 캐시합니다. 설정 패널에서 URL 변경 또는 로컬 `.onnx` 파일 선택이 가능합니다.
+- 학습용 데모입니다. 서버 없이 클라이언트에서만 판정하므로 실제 보안 경계가 아니며, 영상 재생·3D 마스크 공격은 막지 못합니다.
+
+---
+
 **행운을 빕니다! 🚀**
