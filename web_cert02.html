@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>얼굴 인식 생체인증</title>
-    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0"></script>
     <style>
         * {
             margin: 0;
@@ -716,17 +715,22 @@
                         throw new Error('MediaPipe 라이브러리가 로드되지 않았습니다');
                     }
 
-                    const vision = window.Mediapipe.Tasks.Vision;
+                    console.log('📍 MediaPipe Task Vision 접근 중...');
+                    const Vision = window.Mediapipe.Tasks.Vision;
                     
-                    if (!vision || !vision.FaceDetector) {
-                        throw new Error('FaceDetector를 사용할 수 없습니다');
+                    if (!Vision) {
+                        throw new Error('Tasks.Vision을 사용할 수 없습니다');
                     }
 
-                    console.log('📍 FaceDetector 초기화 중...');
+                    console.log('📍 FaceDetector 생성 중...');
                     
-                    this.detector = await vision.FaceDetector.createFromOptions(
+                    this.detector = await Vision.FaceDetector.createFromOptions(
                         { 
-                            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm/${file}` 
+                            locateFile: (file) => {
+                                const url = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm/${file}`;
+                                console.log(`📥 WASM 파일 로드: ${file}`);
+                                return url;
+                            }
                         },
                         {
                             baseOptions: {
@@ -737,11 +741,11 @@
                         }
                     );
 
-                    console.log('✅ FaceDetector 초기화 완료');
+                    console.log('✅ FaceDetector 생성 완료');
                     this.initialized = true;
                 } catch (error) {
                     console.error('❌ Face Detector 초기화 실패:', error);
-                    throw error;
+                    throw new Error('Face Detector 초기화 실패: ' + error.message);
                 }
             }
 
@@ -968,27 +972,12 @@
                     await this.db.init();
                     console.log('✅ 데이터베이스 초기화 완료');
 
-                    // MediaPipe 라이브러리 로드 대기 (최대 10초)
-                    console.log('📍 MediaPipe 라이브러리 로드 대기 중...');
-                    let attempts = 0;
-                    const maxAttempts = 100; // 10초 (100 * 100ms)
-
-                    while (!window.Mediapipe && attempts < maxAttempts) {
-                        await new Promise(r => setTimeout(r, 100));
-                        attempts++;
-                    }
-
+                    // MediaPipe 라이브러리는 이미 로드되었다고 가정 (DOMContentLoaded에서 로드)
                     if (!window.Mediapipe) {
-                        console.error('❌ MediaPipe 라이브러리 로드 실패 (타임아웃)');
-                        this.ui.showStatus('registerStatus', 'warning', 
-                            '⚠️ MediaPipe 라이브러리 로드 중입니다. 잠시 후 다시 시도해주세요.');
-                        
-                        // 재시도
-                        setTimeout(() => this.init(), 3000);
-                        return;
+                        throw new Error('MediaPipe 라이브러리가 로드되지 않았습니다');
                     }
 
-                    console.log('✅ MediaPipe 라이브러리 로드 완료');
+                    console.log('✅ MediaPipe 라이브러리 확인됨');
 
                     // Face Detector 초기화
                     try {
@@ -997,7 +986,9 @@
                     } catch (error) {
                         console.error('❌ Face Detector 초기화 실패:', error);
                         this.ui.showStatus('registerStatus', 'error', 
-                            '❌ 얼굴 감지 모듈 로드 실패: ' + error.message);
+                            '❌ 얼굴 감지 모듈 로드 실패:\n' + error.message + 
+                            '\n\n콘솔(F12)에서 자세한 오류를 확인하세요.');
+                        throw error;
                     }
 
                     this.attachEventListeners();
@@ -1379,14 +1370,98 @@
         }
 
         // ============================================
+        // MediaPipe 라이브러리 로드
+        // ============================================
+
+        async function loadMediaPipeLibrary() {
+            return new Promise((resolve, reject) => {
+                // 이미 로드되어 있으면 바로 반환
+                if (window.Mediapipe) {
+                    console.log('✅ MediaPipe 라이브러리 이미 로드됨');
+                    resolve();
+                    return;
+                }
+
+                console.log('📍 MediaPipe 라이브러리 로드 중...');
+
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0';
+                script.type = 'text/javascript';
+                
+                script.onload = () => {
+                    console.log('✅ MediaPipe 라이브러리 로드 완료');
+                    
+                    // 라이브러리 확인
+                    if (window.Mediapipe) {
+                        resolve();
+                    } else {
+                        reject(new Error('MediaPipe 라이브러리가 정의되지 않았습니다'));
+                    }
+                };
+
+                script.onerror = () => {
+                    console.error('❌ MediaPipe 라이브러리 로드 실패 (jsdelivr)');
+                    
+                    // 대체 CDN 시도
+                    console.log('📍 대체 CDN에서 로드 시도 중...');
+                    const script2 = document.createElement('script');
+                    script2.src = 'https://unpkg.com/@mediapipe/tasks-vision@0.10.0';
+                    script2.type = 'text/javascript';
+                    
+                    script2.onload = () => {
+                        console.log('✅ MediaPipe 라이브러리 로드 완료 (unpkg)');
+                        
+                        if (window.Mediapipe) {
+                            resolve();
+                        } else {
+                            reject(new Error('MediaPipe 라이브러리가 정의되지 않았습니다 (unpkg)'));
+                        }
+                    };
+
+                    script2.onerror = () => {
+                        console.error('❌ MediaPipe 라이브러리 로드 실패 (unpkg)');
+                        reject(new Error('MediaPipe 라이브러리를 로드할 수 없습니다. 인터넷 연결을 확인해주세요.'));
+                    };
+
+                    document.head.appendChild(script2);
+                };
+
+                document.head.appendChild(script);
+            });
+        }
+
+        // ============================================
         // 초기화
         // ============================================
 
         let app;
 
         document.addEventListener('DOMContentLoaded', async () => {
-            app = new FaceAuthApp();
-            await app.init();
+            try {
+                console.log('🚀 애플리케이션 시작...');
+                
+                // MediaPipe 라이브러리 로드
+                try {
+                    await loadMediaPipeLibrary();
+                } catch (error) {
+                    console.error('❌ MediaPipe 라이브러리 로드 실패:', error);
+                    alert('❌ 얼굴 감지 라이브러리를 로드할 수 없습니다.\n\n' +
+                          '원인:\n' +
+                          '- 인터넷 연결 확인\n' +
+                          '- CDN 차단 여부 확인\n' +
+                          '- 방화벽 설정 확인\n\n' +
+                          '다시 새로고침해주세요. (Ctrl+R)');
+                    return;
+                }
+                
+                // 앱 초기화
+                app = new FaceAuthApp();
+                await app.init();
+                console.log('✅ 애플리케이션 준비 완료');
+            } catch (error) {
+                console.error('❌ 초기화 중 오류:', error);
+                alert('❌ 애플리케이션 초기화 실패: ' + error.message);
+            }
         });
     </script>
 </body>
