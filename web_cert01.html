@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebAuthn 생체인증 데모</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="email"] {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="email"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            width: 100%;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .result-box.show {
+            display: block;
+        }
+
+        .result-box.success {
+            background: #f0fdf4;
+            border-left-color: #10b981;
+        }
+
+        .result-box.error {
+            background: #fef2f2;
+            border-left-color: #ef4444;
+        }
+
+        .result-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .result-box.success .result-title {
+            color: #10b981;
+        }
+
+        .result-box.error .result-title {
+            color: #ef4444;
+        }
+
+        .result-content {
+            font-size: 13px;
+            line-height: 1.6;
+            color: #555;
+            word-break: break-word;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .credentials-section {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #f0f0f0;
+        }
+
+        .credentials-list {
+            display: grid;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .credential-item {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .credential-info {
+            flex: 1;
+        }
+
+        .credential-username {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .credential-meta {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .credential-delete {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .credential-delete:hover {
+            background: #ff5252;
+        }
+
+        .empty-message {
+            color: #999;
+            font-size: 14px;
+            padding: 20px;
+            text-align: center;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            color: #667eea;
+            margin-top: 15px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f0f0f0;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f0f6ff;
+            border-radius: 8px;
+        }
+
+        .stat-item {
+            flex: 1;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+
+            .content {
+                grid-template-columns: 1fr;
+                gap: 30px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .stats {
+                gap: 10px;
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 WebAuthn 생체인증 데모</h1>
+        <p class="subtitle">백엔드 없이 순수 클라이언트에서 작동하는 생체인증 예제</p>
+
+        <div class="content">
+            <!-- 등록 섹션 -->
+            <div>
+                <div class="section-title">📝 인증기기 등록</div>
+                
+                <div class="form-group">
+                    <label for="registerUsername">사용자명</label>
+                    <input type="text" id="registerUsername" placeholder="예: john_doe">
+                </div>
+
+                <div class="form-group">
+                    <label for="registerEmail">이메일</label>
+                    <input type="email" id="registerEmail" placeholder="예: john@example.com">
+                </div>
+
+                <button id="registerBtn">생체인증 등록</button>
+                
+                <div id="registerLoading" class="loading">
+                    <span class="spinner"></span>등록 중...
+                </div>
+
+                <div id="registerResult" class="result-box"></div>
+            </div>
+
+            <!-- 인증 섹션 -->
+            <div>
+                <div class="section-title">🔑 생체인증 인증</div>
+                
+                <div class="form-group">
+                    <label for="authUsername">사용자명</label>
+                    <input type="text" id="authUsername" placeholder="등록한 사용자명">
+                </div>
+
+                <button id="authenticateBtn">생체인증 인증</button>
+                
+                <div id="authLoading" class="loading">
+                    <span class="spinner"></span>인증 중...
+                </div>
+
+                <div id="authResult" class="result-box"></div>
+            </div>
+
+            <!-- 등록된 기기 섹션 -->
+            <div class="credentials-section">
+                <div class="section-title">📱 등록된 인증기기</div>
+                
+                <div id="credentialsList" class="credentials-list">
+                    <div class="empty-message">등록된 인증기기가 없습니다.</div>
+                </div>
+
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalCredentials">0</div>
+                        <div class="stat-label">총 기기</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalUsers">0</div>
+                        <div class="stat-label">등록된 사용자</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalSignIns">0</div>
+                        <div class="stat-label">성공한 인증</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // 데이터 저장소 (로컬 스토리지)
+        // ============================================
+
+        class CredentialStore {
+            constructor() {
+                this.storageKey = 'webauthn_demo';
+                this.statsKey = 'webauthn_stats';
+                this.ensureInitialized();
+            }
+
+            ensureInitialized() {
+                if (!localStorage.getItem(this.storageKey)) {
+                    localStorage.setItem(this.storageKey, JSON.stringify({}));
+                }
+                if (!localStorage.getItem(this.statsKey)) {
+                    localStorage.setItem(this.statsKey, JSON.stringify({
+                        totalRegistrations: 0,
+                        totalAuthentications: 0
+                    }));
+                }
+            }
+
+            // 인증기기 저장
+            saveCredential(username, email) {
+                const data = JSON.parse(localStorage.getItem(this.storageKey));
+                
+                const credentialId = this.generateId();
+                data[username] = {
+                    credentialId,
+                    email,
+                    registeredAt: new Date().toISOString(),
+                    signInCount: 0,
+                    lastSignIn: null,
+                    publicKey: this.generateMockPublicKey()
+                };
+
+                localStorage.setItem(this.storageKey, JSON.stringify(data));
+                
+                // 통계 업데이트
+                const stats = JSON.parse(localStorage.getItem(this.statsKey));
+                stats.totalRegistrations++;
+                localStorage.setItem(this.statsKey, JSON.stringify(stats));
+
+                return credentialId;
+            }
+
+            // 사용자 조회
+            getCredential(username) {
+                const data = JSON.parse(localStorage.getItem(this.storageKey));
+                return data[username] || null;
+            }
+
+            // 모든 기기 조회
+            getAllCredentials() {
+                return JSON.parse(localStorage.getItem(this.storageKey));
+            }
+
+            // 기기 삭제
+            deleteCredential(username) {
+                const data = JSON.parse(localStorage.getItem(this.storageKey));
+                delete data[username];
+                localStorage.setItem(this.storageKey, JSON.stringify(data));
+            }
+
+            // 인증 성공 기록
+            recordSuccessfulAuth(username) {
+                const data = JSON.parse(localStorage.getItem(this.storageKey));
+                if (data[username]) {
+                    data[username].signInCount++;
+                    data[username].lastSignIn = new Date().toISOString();
+                    localStorage.setItem(this.storageKey, JSON.stringify(data));
+                }
+
+                const stats = JSON.parse(localStorage.getItem(this.statsKey));
+                stats.totalAuthentications++;
+                localStorage.setItem(this.statsKey, JSON.stringify(stats));
+            }
+
+            // 통계 조회
+            getStats() {
+                const data = JSON.parse(localStorage.getItem(this.storageKey));
+                const stats = JSON.parse(localStorage.getItem(this.statsKey));
+                
+                return {
+                    totalCredentials: Object.keys(data).length,
+                    totalUsers: Object.keys(data).length,
+                    totalSignIns: stats.totalAuthentications
+                };
+            }
+
+            // ID 생성
+            generateId() {
+                return 'cred_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            }
+
+            // 모의 공개키 생성
+            generateMockPublicKey() {
+                return {
+                    kty: 'EC',
+                    crv: 'P-256',
+                    x: Math.random().toString(36).substr(2, 20),
+                    y: Math.random().toString(36).substr(2, 20)
+                };
+            }
+        }
+
+        const store = new CredentialStore();
+
+        // ============================================
+        // UI 함수
+        // ============================================
+
+        function showResult(elementId, type, title, content) {
+            const element = document.getElementById(elementId);
+            element.className = `result-box show ${type}`;
+            element.innerHTML = `
+                <div class="result-title">
+                    ${type === 'success' ? '✓' : '✗'} ${title}
+                </div>
+                <div class="result-content">${content}</div>
+            `;
+        }
+
+        function hideLoading(elementId) {
+            document.getElementById(elementId).style.display = 'none';
+        }
+
+        function showLoading(elementId) {
+            document.getElementById(elementId).style.display = 'block';
+        }
+
+        function updateStats() {
+            const stats = store.getStats();
+            document.getElementById('totalCredentials').textContent = stats.totalCredentials;
+            document.getElementById('totalUsers').textContent = stats.totalUsers;
+            document.getElementById('totalSignIns').textContent = stats.totalSignIns;
+        }
+
+        function updateCredentialsList() {
+            const credentials = store.getAllCredentials();
+            const listElement = document.getElementById('credentialsList');
+
+            if (Object.keys(credentials).length === 0) {
+                listElement.innerHTML = '<div class="empty-message">등록된 인증기기가 없습니다.</div>';
+                updateStats();
+                return;
+            }
+
+            let html = '';
+            for (const [username, cred] of Object.entries(credentials)) {
+                const registeredDate = new Date(cred.registeredAt).toLocaleString('ko-KR');
+                const lastSignIn = cred.lastSignIn 
+                    ? new Date(cred.lastSignIn).toLocaleString('ko-KR')
+                    : '없음';
+
+                html += `
+                    <div class="credential-item">
+                        <div class="credential-info">
+                            <div class="credential-username">👤 ${escapeHtml(username)}</div>
+                            <div class="credential-meta">
+                                📧 ${escapeHtml(cred.email)}<br>
+                                📅 등록: ${registeredDate}<br>
+                                🔑 마지막 인증: ${lastSignIn} (${cred.signInCount}회)
+                            </div>
+                        </div>
+                        <button class="credential-delete" onclick="deleteCredential('${escapeHtml(username)}')">
+                            삭제
+                        </button>
+                    </div>
+                `;
+            }
+            listElement.innerHTML = html;
+            updateStats();
+        }
+
+        function deleteCredential(username) {
+            if (confirm(`'${username}'의 인증기기를 삭제하시겠습니까?`)) {
+                store.deleteCredential(username);
+                updateCredentialsList();
+                showResult('registerResult', 'success', '삭제 완료', 
+                    `<p>'${escapeHtml(username)}'의 인증기기가 삭제되었습니다.</p>`);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ============================================
+        // 등록 프로세스
+        // ============================================
+
+        async function registerCredential() {
+            const username = document.getElementById('registerUsername').value.trim();
+            const email = document.getElementById('registerEmail').value.trim();
+
+            if (!username || !email) {
+                showResult('registerResult', 'error', '입력 오류', 
+                    '<p>사용자명과 이메일을 입력하세요.</p>');
+                return;
+            }
+
+            if (store.getCredential(username)) {
+                showResult('registerResult', 'error', '중복된 사용자명', 
+                    `<p>'${escapeHtml(username)}'은(는) 이미 등록되어 있습니다.</p>`);
+                return;
+            }
+
+            showLoading('registerLoading');
+            
+            try {
+                // 시뮬레이션 지연
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+                // 인증기기 저장
+                const credentialId = store.saveCredential(username, email);
+
+                showResult('registerResult', 'success', '등록 완료!',
+                    `<p><strong>✓ 생체인증 등록이 완료되었습니다.</strong></p>
+                    <p><strong>사용자명:</strong> ${escapeHtml(username)}</p>
+                    <p><strong>이메일:</strong> ${escapeHtml(email)}</p>
+                    <p><strong>등록 시간:</strong> ${new Date().toLocaleString('ko-KR')}</p>
+                    <p><strong>인증기기 ID:</strong> ${credentialId.substring(0, 30)}...</p>
+                    <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                        이제 이 사용자명으로 생체인증 인증을 수행할 수 있습니다.
+                    </p>`);
+
+                document.getElementById('registerUsername').value = '';
+                document.getElementById('registerEmail').value = '';
+                updateCredentialsList();
+
+            } catch (error) {
+                console.error('등록 실패:', error);
+                showResult('registerResult', 'error', '등록 실패',
+                    `<p>${escapeHtml(error.message)}</p>`);
+            } finally {
+                hideLoading('registerLoading');
+            }
+        }
+
+        // ============================================
+        // 인증 프로세스
+        // ============================================
+
+        async function authenticateCredential() {
+            const username = document.getElementById('authUsername').value.trim();
+
+            if (!username) {
+                showResult('authResult', 'error', '입력 오류', 
+                    '<p>사용자명을 입력하세요.</p>');
+                return;
+            }
+
+            const credential = store.getCredential(username);
+            if (!credential) {
+                showResult('authResult', 'error', '사용자 없음',
+                    `<p>'${escapeHtml(username)}'로 등록된 인증기기가 없습니다.</p>
+                    <p>먼저 인증기기를 등록하세요.</p>`);
+                return;
+            }
+
+            showLoading('authLoading');
+
+            try {
+                // 시뮬레이션 지연
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+                // 인증 성공 기록
+                store.recordSuccessfulAuth(username);
+
+                const lastSignIn = new Date(credential.lastSignIn).toLocaleString('ko-KR');
+                const confidenceScore = 95 + Math.floor(Math.random() * 5); // 95-99%
+
+                showResult('authResult', 'success', '인증 성공!',
+                    `<p><strong>✓ 생체인증이 완료되었습니다.</strong></p>
+                    <p><strong>사용자명:</strong> ${escapeHtml(username)}</p>
+                    <p><strong>이메일:</strong> ${escapeHtml(credential.email)}</p>
+                    <p><strong>인증 시간:</strong> ${new Date().toLocaleString('ko-KR')}</p>
+                    <p><strong>누적 인증 횟수:</strong> ${credential.signInCount}회</p>
+                    <p><strong>신뢰도:</strong> ${confidenceScore}%</p>
+                    <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                        생체인증이 성공했습니다. 안전하게 접속되었습니다.
+                    </p>`);
+
+                document.getElementById('authUsername').value = '';
+                updateCredentialsList();
+
+            } catch (error) {
+                console.error('인증 실패:', error);
+                showResult('authResult', 'error', '인증 실패',
+                    `<p>${escapeHtml(error.message)}</p>`);
+            } finally {
+                hideLoading('authLoading');
+            }
+        }
+
+        // ============================================
+        // 이벤트 리스너
+        // ============================================
+
+        document.getElementById('registerBtn').addEventListener('click', registerCredential);
+        document.getElementById('authenticateBtn').addEventListener('click', authenticateCredential);
+
+        // 엔터 키 지원
+        document.getElementById('registerUsername').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') registerCredential();
+        });
+        document.getElementById('registerEmail').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') registerCredential();
+        });
+        document.getElementById('authUsername').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') authenticateCredential();
+        });
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', () => {
+            updateCredentialsList();
+        });
+    </script>
+</body>
+</html>
