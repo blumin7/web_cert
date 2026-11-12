@@ -591,11 +591,55 @@
                 return;
             }
 
+            // WebAuthn 지원 확인
+            if (!window.PublicKeyCredential) {
+                showResult('registerResult', 'error', 'WebAuthn 미지원',
+                    '<p>이 기기는 WebAuthn(생체인증)을 지원하지 않습니다.</p>');
+                return;
+            }
+
             showLoading('registerLoading');
             
             try {
-                // 시뮬레이션 지연
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                // Challenge 생성 (서버에서 받아야 하지만, 여기서는 클라이언트에서 생성)
+                const challenge = new Uint8Array(32);
+                crypto.getRandomValues(challenge);
+
+                // WebAuthn 등록 요청
+                const publicKeyCredentialCreationOptions = {
+                    challenge: challenge,
+                    rp: {
+                        name: 'WebAuthn Demo',
+                        id: window.location.hostname
+                    },
+                    user: {
+                        id: new TextEncoder().encode(username),
+                        name: username,
+                        displayName: email
+                    },
+                    pubKeyCredParams: [
+                        { alg: -7, type: 'public-key' },  // ES256
+                        { alg: -257, type: 'public-key' }  // RS256
+                    ],
+                    timeout: 60000,
+                    attestation: 'direct',
+                    authenticatorSelection: {
+                        authenticatorAttachment: 'platform',
+                        residentKey: 'preferred',
+                        userVerification: 'preferred'
+                    }
+                };
+
+                // 실제 생체인증 창 표시
+                const credential = await navigator.credentials.create({
+                    publicKey: publicKeyCredentialCreationOptions
+                });
+
+                if (!credential) {
+                    showResult('registerResult', 'error', '등록 취소',
+                        '<p>생체인증 등록이 취소되었습니다.</p>');
+                    return;
+                }
 
                 // 인증기기 저장
                 const credentialId = store.saveCredential(username, email);
@@ -606,6 +650,7 @@
                     <p><strong>이메일:</strong> ${escapeHtml(email)}</p>
                     <p><strong>등록 시간:</strong> ${new Date().toLocaleString('ko-KR')}</p>
                     <p><strong>인증기기 ID:</strong> ${credentialId.substring(0, 30)}...</p>
+                    <p><strong>Credential ID:</strong> ${credential.id.substring(0, 30)}...</p>
                     <p style="margin-top: 10px; font-size: 12px; color: #666;">
                         이제 이 사용자명으로 생체인증 인증을 수행할 수 있습니다.
                     </p>`);
@@ -616,8 +661,18 @@
 
             } catch (error) {
                 console.error('등록 실패:', error);
+                
+                let errorMsg = error.message;
+                if (error.name === 'NotAllowedError') {
+                    errorMsg = '생체인증 등록이 거부되었습니다.';
+                } else if (error.name === 'NotSupportedError') {
+                    errorMsg = '이 기기는 WebAuthn을 지원하지 않습니다.';
+                } else if (error.name === 'InvalidStateError') {
+                    errorMsg = '이 인증기기는 이미 등록되어 있습니다.';
+                }
+                
                 showResult('registerResult', 'error', '등록 실패',
-                    `<p>${escapeHtml(error.message)}</p>`);
+                    `<p>${escapeHtml(errorMsg)}</p>`);
             } finally {
                 hideLoading('registerLoading');
             }
@@ -644,17 +699,41 @@
                 return;
             }
 
+            // WebAuthn 지원 확인
+            if (!window.PublicKeyCredential) {
+                showResult('authResult', 'error', 'WebAuthn 미지원',
+                    '<p>이 기기는 WebAuthn(생체인증)을 지원하지 않습니다.</p>');
+                return;
+            }
+
             showLoading('authLoading');
 
             try {
-                // 시뮬레이션 지연
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                // Challenge 생성
+                const challenge = new Uint8Array(32);
+                crypto.getRandomValues(challenge);
+
+                // WebAuthn 인증 요청
+                const publicKeyCredentialRequestOptions = {
+                    challenge: challenge,
+                    timeout: 60000,
+                    rpId: window.location.hostname,
+                    userVerification: 'preferred'
+                };
+
+                // 실제 생체인증 창 표시
+                const assertion = await navigator.credentials.get({
+                    publicKey: publicKeyCredentialRequestOptions
+                });
+
+                if (!assertion) {
+                    showResult('authResult', 'error', '인증 취소',
+                        '<p>생체인증이 취소되었습니다.</p>');
+                    return;
+                }
 
                 // 인증 성공 기록
                 store.recordSuccessfulAuth(username);
-
-                const lastSignIn = new Date(credential.lastSignIn).toLocaleString('ko-KR');
-                const confidenceScore = 95 + Math.floor(Math.random() * 5); // 95-99%
 
                 showResult('authResult', 'success', '인증 성공!',
                     `<p><strong>✓ 생체인증이 완료되었습니다.</strong></p>
@@ -662,7 +741,7 @@
                     <p><strong>이메일:</strong> ${escapeHtml(credential.email)}</p>
                     <p><strong>인증 시간:</strong> ${new Date().toLocaleString('ko-KR')}</p>
                     <p><strong>누적 인증 횟수:</strong> ${credential.signInCount}회</p>
-                    <p><strong>신뢰도:</strong> ${confidenceScore}%</p>
+                    <p><strong>Credential ID:</strong> ${assertion.id.substring(0, 30)}...</p>
                     <p style="margin-top: 10px; font-size: 12px; color: #666;">
                         생체인증이 성공했습니다. 안전하게 접속되었습니다.
                     </p>`);
@@ -672,8 +751,18 @@
 
             } catch (error) {
                 console.error('인증 실패:', error);
+                
+                let errorMsg = error.message;
+                if (error.name === 'NotAllowedError') {
+                    errorMsg = '생체인증이 거부되었습니다. 다시 시도해주세요.';
+                } else if (error.name === 'NotSupportedError') {
+                    errorMsg = '이 기기는 WebAuthn을 지원하지 않습니다.';
+                } else if (error.name === 'InvalidStateError') {
+                    errorMsg = '등록되지 않은 인증기기입니다.';
+                }
+                
                 showResult('authResult', 'error', '인증 실패',
-                    `<p>${escapeHtml(error.message)}</p>`);
+                    `<p>${escapeHtml(errorMsg)}</p>`);
             } finally {
                 hideLoading('authLoading');
             }
